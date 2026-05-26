@@ -3,22 +3,12 @@ from transformers import AutoTokenizer, AutoModel
 import os
 import torch
 import time
-import torchao
-# must import this to register the fusion passes
-import torchao.quantization.pt2e.quantizer.x86_inductor_quantizer
-from torchao.prototype.smoothquant import SmoothQuantConfig
-from torchao.quantization.quantize_.common.quantization_step import QuantizationStep
-from torchao.quantization.granularity import PerTensor, PerRow
-from torchao.quantization.quant_api import (
-    Int8DynamicActivationInt8WeightConfig,
-    Int8StaticActivationInt8WeightConfig,
-)
 import multiprocessing as mp
 
-import torch._inductor.config as config
-config.freezing = True
-config.max_autotune = True
-config.cpp_wrapper = True
+from smoothquant_utils import (
+    apply_smoothquant, optional_autocast, do_compile, do_aoti_compile, infer,
+    inductor_config as config,
+)
 
 
 argparser = argparse.ArgumentParser()
@@ -77,62 +67,17 @@ model = AutoModel.from_pretrained(encoder)
 model.eval()
 
 if args.quant_mode != "none":
-    if args.quant_mode == "smooth-dynamic": # dynamic smooth quant
-        base_config=Int8DynamicActivationInt8WeightConfig(
-            version=2,
-            granularity=[PerRow(),PerRow()],
-        )
-    elif args.quant_mode == "smooth-static": # static smooth quant
-        base_config=Int8StaticActivationInt8WeightConfig(
-            granularity=[PerTensor(),PerRow()],
-        )
-
-    quant_config = SmoothQuantConfig(
-        base_config=base_config,
-        step=QuantizationStep.PREPARE,
-        alpha=0.5,
-    )
-
-    torchao.quantization.quantize_(model, quant_config)
-    model(*model_inputs)
-    quant_config.step = QuantizationStep.CONVERT
-    torchao.quantization.quantize_(model, quant_config)
+    model = apply_smoothquant(model, args.quant_mode, 0.5, model_inputs,
+                              use_autocast=AUTOCAST, filter_fn=None)
 
 
-def optional_autocast(func): # decorator
-    def f(*args, **kw):
-        if AUTOCAST:
-            with torch.no_grad(), torch.autocast('cpu'):
-                rv = func(*args, **kw)
-        else:
-            with torch.no_grad():
-                rv = func(*args, **kw)
-        return rv
-    return f
+# Bind autocast helpers to the global AUTOCAST setting
+_infer = optional_autocast(lambda m, inp: m(*inp), AUTOCAST)
+_compile = lambda m: do_compile(m, AUTOCAST)
 
-
-@optional_autocast
-def infer(model, model_inputs):
-    return model(*model_inputs)
-
-
-@optional_autocast
-def compile(model):
-    options={"guard_filter_fn": torch.compiler.skip_guard_on_all_nn_modules_unsafe}
-    return torch.compile(model, options=options, fullgraph=True)
-
-
-@optional_autocast
-def aot_compile(model):
-    import torch._export.utils as eu
-    with eu._disable_aten_to_metadata_assertions():
-        exported = torch.export.export(model, args=model_inputs)
+def _aot_compile(m):
     save_path = os.path.join(os.getcwd(), f"{args.model.replace('/', '_')}_quant_{args.quant_mode}_autocast_{args.autocast}.pt2")
-    output_path = torch._inductor.aoti_compile_and_package(
-        exported,
-        package_path=save_path,
-    )
-    return torch._inductor.aoti_load_package(save_path)
+    return do_aoti_compile(m, model_inputs, AUTOCAST, save_path)
 
 
 KMP_AFFINITY = os.environ.get('KMP_AFFINITY', '')
@@ -141,9 +86,9 @@ torch.set_num_threads(args.cores_per_instance)
 os.environ['OMP_NUM_THREADS'] = f'{args.cores_per_instance}'
 os.sched_setaffinity(os.getpid(), available_cores[:args.cores_per_instance])
 torch._dynamo.reset() # reset dynamo to clear the cache and profile the compilation
-compiled_model = aot_compile(model) if args.aoti else compile(model)
+compiled_model = _aot_compile(model) if args.aoti else _compile(model)
 # run once so that torch.compile takes effect
-infer(compiled_model, model_inputs)
+_infer(compiled_model, model_inputs)
 os.environ['KMP_AFFINITY'] = KMP_AFFINITY
 
 
@@ -157,10 +102,10 @@ def run_benchmark(compiled_model, model_inputs, inst_id, core_list):
     torch.set_num_threads(len(core_list))
     os.environ['OMP_NUM_THREADS'] = f'{len(core_list)}'
     for _ in range(args.warmup):
-        infer(compiled_model, model_inputs)
+        _infer(compiled_model, model_inputs)
     t0 = time.time()
     for _ in range(args.active):
-        infer(compiled_model, model_inputs)
+        _infer(compiled_model, model_inputs)
     elapsed = time.time() - t0
     rps = args.active / elapsed # requests per second
     qlinear_per_iter_ms = None  # filled in below if profiling
@@ -241,7 +186,7 @@ def run_benchmark(compiled_model, model_inputs, inst_id, core_list):
             profile_memory=True,
         ) as prof:
             for _ in range(2 + 2 + profile_active):
-                infer(compiled_model, model_inputs)
+                _infer(compiled_model, model_inputs)
                 prof.step()
 
         if qlinear_totals_us:
