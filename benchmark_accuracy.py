@@ -51,7 +51,8 @@ from smoothquant_utils import (
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-ALL_QUANT_MODES = ["fp32", "bf16", "smooth-static", "smooth-dynamic"]
+ALL_QUANT_MODES = ["fp32", "bf16", "smooth-static", "smooth-static-autocast",
+                   "smooth-dynamic", "smooth-dynamic-autocast"]
 
 
 def parse_args():
@@ -100,7 +101,8 @@ def iter_runs(quant_modes, alphas):
     """Yield (quant_mode, alpha, use_autocast, label) for each configuration.
 
     fp32 and bf16 are baselines (no quantization).
-    smooth-* modes always use autocast and iterate over alpha values.
+    smooth-static / smooth-dynamic run without autocast.
+    smooth-static-autocast / smooth-dynamic-autocast run with bf16 autocast.
     """
     for mode in quant_modes:
         if mode == "fp32":
@@ -108,8 +110,10 @@ def iter_runs(quant_modes, alphas):
         elif mode == "bf16":
             yield "none", None, True, "bf16"
         elif mode.startswith("smooth-"):
+            use_autocast = mode.endswith("-autocast")
+            base_mode = mode[:-len("-autocast")] if use_autocast else mode
             for a in alphas:
-                yield mode, a, True, f"{mode}(a={a:.2f})"
+                yield base_mode, a, use_autocast, f"{mode}(a={a:.2f})"
         else:
             yield mode, None, False, mode
 
@@ -475,8 +479,10 @@ def run_report(args):
                     if lbl not in order:
                         extras.append(lbl)
         def _key(lbl):
+            if lbl.startswith("smooth-static-autocast"): return (3, lbl)
             if lbl.startswith("smooth-static"): return (2, lbl)
-            if lbl.startswith("smooth-dynamic"): return (3, lbl)
+            if lbl.startswith("smooth-dynamic-autocast"): return (5, lbl)
+            if lbl.startswith("smooth-dynamic"): return (4, lbl)
             return (0, lbl)
         return [l for l in order if l in seen] + sorted(extras, key=_key)
 
@@ -611,7 +617,7 @@ def main():
 # Best-alpha summary
 # ---------------------------------------------------------------------------
 
-_ALPHA_RE = re.compile(r"^(smooth-\w+)\(a=([\d.]+)\)$")
+_ALPHA_RE = re.compile(r"^(smooth-[\w-]+?)\(a=([\d.]+)\)$")
 
 
 def _extract_metric(entry, task):
@@ -657,7 +663,8 @@ def _print_best_alpha_summary(all_results, csv_path=None):
             if prev is None or val > prev[0]:
                 mode_best[mode] = (val, alpha_str, entry)
 
-        for mode in ("smooth-static", "smooth-dynamic"):
+        for mode in ("smooth-static", "smooth-static-autocast",
+                     "smooth-dynamic", "smooth-dynamic-autocast"):
             if mode in mode_best:
                 best_val, best_alpha, _ = mode_best[mode]
                 rows.append((task, mode, best_alpha, metric_name, f"{best_val:.2f}"))

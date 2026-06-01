@@ -8,7 +8,7 @@
 # Environment overrides:
 #   CORES="0-3"            core range for taskset
 #   TASK=all               squad | mnli | all | report
-#   MODE=all               fp32 | bf16 | smooth-static | smooth-dynamic | all
+#   MODE=all               fp32 | bf16 | smooth-static | smooth-static-autocast | smooth-dynamic | smooth-dynamic-autocast | all
 #   MODEL_KEY=distilbert-base
 #                          bert-large | xlm-roberta-base | distilbert-base
 #   NUM_SAMPLES=500        validation samples ('all' = entire dataset)
@@ -52,8 +52,8 @@ done
 
 # Validate MODE
 case "${MODE}" in
-    fp32|bf16|smooth-static|smooth-dynamic|all) ;;
-    *) echo "ERROR: Unknown MODE '${MODE}'. Valid: fp32 bf16 smooth-static smooth-dynamic all"; exit 1 ;;
+    fp32|bf16|smooth-static|smooth-static-autocast|smooth-dynamic|smooth-dynamic-autocast|all) ;;
+    *) echo "ERROR: Unknown MODE '${MODE}'. Valid: fp32 bf16 smooth-static smooth-static-autocast smooth-dynamic smooth-dynamic-autocast all"; exit 1 ;;
 esac
 
 ALPHA_SWEEP="0.25 0.4 0.5 0.7 0.75 0.8 0.85 0.9"
