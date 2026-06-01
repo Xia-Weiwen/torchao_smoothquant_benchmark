@@ -167,7 +167,8 @@ def run_benchmark(compiled_model, model_inputs, inst_id, core_list):
                 f"(avg {total_qlinear_us/1000/profile_active:.3f} ms/iter over {profile_active} active iters)"
             )
             text = "\n".join(lines)
-            print(text)
+            if inst_id == 0:
+                print(text)
             out_file.write("\n" + text + "\n")
             qlinear_totals_us.append(total_qlinear_us)
             return total_qlinear_us
@@ -177,13 +178,13 @@ def run_benchmark(compiled_model, model_inputs, inst_id, core_list):
             with open(log_file_path, "w") as f:
                 f.write(table)
                 summarize_qlinear(prof, f)
-            print(table)
+            if inst_id == 0:
+                print(table)
 
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
             schedule=torch.profiler.schedule(wait=2, warmup=2, active=profile_active),
             on_trace_ready=trace_handler,
-            profile_memory=True,
         ) as prof:
             for _ in range(2 + 2 + profile_active):
                 _infer(compiled_model, model_inputs)
