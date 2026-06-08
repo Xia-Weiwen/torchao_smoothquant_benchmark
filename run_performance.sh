@@ -20,6 +20,6 @@ cases=(
 for model in ${model_list}; do
     for case in "${cases[@]}"; do
         echo "Running ${model} with case: ${case}"
-        taskset -c 0-${max_idx} python smoothquant_example.py --cpu-name "${CPU_NAME}" --model ${model} ${case} ${extra_args}
+        taskset -c 0-${max_idx} python benchmark_performance.py --cpu-name "${CPU_NAME}" --model ${model} ${case} ${extra_args}
     done
 done

@@ -1,2 +1,5 @@
 *.pt2
+*.csv
 benchmark_logs/
+torch_compile_debug/
+__pycache__/

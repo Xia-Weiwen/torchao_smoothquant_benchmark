@@ -25,7 +25,7 @@ argparser.add_argument("--warmup", type=int, default=20)
 argparser.add_argument("--active", type=int, default=50)
 argparser.add_argument("--profile", action='store_true')
 argparser.add_argument("--cores-per-instance", type=int, default=4)
-argparser.add_argument("--cpu-name", type=str, default="", help="CPU label to record in result.csv")
+argparser.add_argument("--cpu-name", type=str, default="", help="CPU label to record in performance.csv")
 args = argparser.parse_args()
 
 
@@ -235,24 +235,82 @@ if qlinear_per_iter_ms_list:
     total_q = sum(qlinear_per_iter_ms_list)
     avg_qlinear_ms = total_q / n
 
-# Append a row to result.csv for easy aggregation across runs.
+# Append a row to performance.csv for easy aggregation across runs.
 import csv
-csv_path = "result.csv"
+csv_path = "performance.csv"
 csv_fields = [
-    "cpu_name", "num_cores", "num_instances", "model", "quant_mode",
-    "autocast", "aoti", "total_rps", "avg_rps", "avg_qlinear_ms",
+    "Cpu name", "Num cores", "Num instances", "Model", "Quantization method",
+    "Autocast", "Aoti", "Total throughput (RPS)", "Avg throughput (RPS)",
+    "Avg linear latency (ms)", "Throughput speedup", "Linear speedup",
 ]
+
+def _bool_str(b):
+    return "TRUE" if b else "FALSE"
+
+# Display label for the Quantization method column.
+# "none" baseline becomes FP32 (autocast off) or BF16 (autocast on);
+# smooth-* modes get an "-autocast" suffix when autocast is on.
+if args.quant_mode == "none":
+    quant_method_display = "BF16" if args.autocast else "FP32"
+else:
+    quant_method_display = (args.quant_mode + "-autocast"
+                            if args.autocast else args.quant_mode)
+
+# Look up the matching baseline (same cpu_name/cores/instances/model/aoti,
+# Quantization method=FP32) to compute speedups vs FP32 baseline.
+def _find_baseline_row():
+    if not os.path.exists(csv_path):
+        return None
+    try:
+        with open(csv_path, "r", newline="") as fh:
+            for row in csv.DictReader(fh):
+                if (row.get("Cpu name") == args.cpu_name
+                        and row.get("Num cores") == str(num_cores)
+                        and row.get("Num instances") == str(num_instances)
+                        and row.get("Model") == args.model
+                        and row.get("Aoti") == _bool_str(args.aoti)
+                        and row.get("Quantization method") == "FP32"):
+                    return row
+    except Exception:
+        return None
+    return None
+
+baseline = _find_baseline_row()
+if quant_method_display == "FP32":
+    throughput_speedup = "100.0%"
+    linear_speedup = "100.0%" if avg_qlinear_ms != "" else ""
+elif baseline is not None:
+    try:
+        bl_total = float(baseline.get("Total throughput (RPS)") or 0)
+        throughput_speedup = (f"{total_rps / bl_total * 100:.1f}%"
+                              if bl_total > 0 else "")
+    except Exception:
+        throughput_speedup = ""
+    try:
+        bl_lin = float(baseline.get("Avg linear latency (ms)") or 0)
+        if bl_lin > 0 and avg_qlinear_ms != "" and avg_qlinear_ms > 0:
+            linear_speedup = f"{bl_lin / avg_qlinear_ms * 100:.1f}%"
+        else:
+            linear_speedup = ""
+    except Exception:
+        linear_speedup = ""
+else:
+    throughput_speedup = ""
+    linear_speedup = ""
+
 csv_row = {
-    "cpu_name": args.cpu_name,
-    "num_cores": num_cores,
-    "num_instances": num_instances,
-    "model": args.model,
-    "quant_mode": args.quant_mode,
-    "autocast": args.autocast,
-    "aoti": args.aoti,
-    "total_rps": round(total_rps, 2),
-    "avg_rps": round(total_rps / num_instances, 2),
-    "avg_qlinear_ms": (round(avg_qlinear_ms, 3) if avg_qlinear_ms != "" else ""),
+    "Cpu name": args.cpu_name,
+    "Num cores": num_cores,
+    "Num instances": num_instances,
+    "Model": args.model,
+    "Quantization method": quant_method_display,
+    "Autocast": _bool_str(args.autocast),
+    "Aoti": _bool_str(args.aoti),
+    "Total throughput (RPS)": round(total_rps, 2),
+    "Avg throughput (RPS)": round(total_rps / num_instances, 2),
+    "Avg linear latency (ms)": (round(avg_qlinear_ms, 3) if avg_qlinear_ms != "" else ""),
+    "Throughput speedup": throughput_speedup,
+    "Linear speedup": linear_speedup,
 }
 write_header = not os.path.exists(csv_path)
 with open(csv_path, "a", newline="") as f:

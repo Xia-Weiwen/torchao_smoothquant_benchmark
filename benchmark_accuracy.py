@@ -554,6 +554,25 @@ def run_report(args):
                 print("\n--- CSV ---\n")
             print("\n".join(sections_csv))
 
+    # Always also write a combined best-alpha CSV across all models
+    combined_rows = []
+    for path in json_files:
+        if "profiler" in os.path.basename(path):
+            continue
+        try:
+            with open(path) as fh:
+                d = json.load(fh)
+        except Exception:
+            continue
+        combined_rows.extend(_build_best_rows(d))
+
+    if combined_rows:
+        combined_text = _rows_to_csv_text(combined_rows)
+        combined_path = os.path.join(results_dir, "accuracy.csv")
+        with open(combined_path, "w") as fh:
+            fh.write(combined_text)
+        print(f"\nCombined accuracy CSV: {combined_path}")
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -620,6 +639,15 @@ def main():
 _ALPHA_RE = re.compile(r"^(smooth-[\w-]+?)\(a=([\d.]+)\)$")
 
 
+def _metrics_for_task(task):
+    """Return list of (json_key, display_name) for a given task."""
+    if task == "squad":
+        return [("f1", "F1"), ("exact_match", "EM")]
+    elif task == "mnli":
+        return [("accuracy", "Accuracy")]
+    return []
+
+
 def _extract_metric(entry, task):
     """Return the primary metric value from a result entry, or None."""
     if "error" in entry:
@@ -631,32 +659,43 @@ def _extract_metric(entry, task):
     return None
 
 
-def _print_best_alpha_summary(all_results, csv_path=None):
-    """Scan results for multiple alpha runs and print a CSV of the best."""
-    import csv, io
+def _build_best_rows(all_results):
+    """Build best-alpha rows for one all_results dict.
 
+    Returns list of (model_id, task, quant_mode, best_alpha_str, [(metric_name, value), ...]).
+    """
     model_id = all_results.get("model", "unknown")
-    rows = []  # (task, quant_mode, best_alpha, metric_name, metric_value)
+    rows = []
 
     for task, task_results in all_results.get("tasks", {}).items():
-        metric_name = "F1" if task == "squad" else "Accuracy"
+        metrics = _metrics_for_task(task)
+        if not metrics:
+            continue
+        primary_key = metrics[0][0]
+        task_display = {"squad": "SQuAD", "mnli": "MultiNLI"}.get(task, task)
 
-        # Baselines (fp32 and/or bf16)
+        # Baselines
         for bl_label in ("fp32", "bf16", "none"):
             baseline = task_results.get(bl_label)
-            if baseline is not None:
-                val = _extract_metric(baseline, task)
-                if val is not None:
-                    rows.append((task, bl_label, "", metric_name, f"{val:.2f}"))
+            if baseline is None or "error" in baseline:
+                continue
+            pairs = []
+            for mkey, mname in metrics:
+                v = baseline.get(mkey)
+                if v is not None:
+                    pairs.append((mname, f"{v:.2f}"))
+            if pairs:
+                display = {"fp32": "FP32", "bf16": "BF16"}.get(bl_label, bl_label)
+                rows.append((model_id, task_display, display, "N/A", pairs))
 
-        # Group by quant mode, find best alpha
-        mode_best = {}  # mode -> (best_val, best_alpha, all_entries)
+        # Best alpha per smooth-* mode (selected by primary metric)
+        mode_best = {}
         for label, entry in task_results.items():
             m = _ALPHA_RE.match(label)
-            if not m:
+            if not m or "error" in entry:
                 continue
             mode, alpha_str = m.group(1), m.group(2)
-            val = _extract_metric(entry, task)
+            val = entry.get(primary_key)
             if val is None:
                 continue
             prev = mode_best.get(mode)
@@ -665,19 +704,50 @@ def _print_best_alpha_summary(all_results, csv_path=None):
 
         for mode in ("smooth-static", "smooth-static-autocast",
                      "smooth-dynamic", "smooth-dynamic-autocast"):
-            if mode in mode_best:
-                best_val, best_alpha, _ = mode_best[mode]
-                rows.append((task, mode, best_alpha, metric_name, f"{best_val:.2f}"))
+            if mode not in mode_best:
+                continue
+            _, best_alpha, entry = mode_best[mode]
+            pairs = []
+            for mkey, mname in metrics:
+                v = entry.get(mkey)
+                if v is not None:
+                    pairs.append((mname, f"{v:.2f}"))
+            if pairs:
+                rows.append((model_id, task_display, mode, best_alpha, pairs))
+
+    return rows
+
+
+def _rows_to_csv_text(rows):
+    """Render best-alpha rows as wide CSV text."""
+    import csv, io
 
     if not rows:
-        return
+        return ""
+    max_metrics = max(len(p) for _, _, _, _, p in rows)
+    headers = ["Task", "Model", "Quantization method", "Best alpha"]
+    for _ in range(max_metrics):
+        headers += ["Metric", "Value"]
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["model", "task", "quant_mode", "best_alpha", "metric", "value"])
-    for task, mode, alpha, metric_name, val in rows:
-        w.writerow([model_id, task, mode, alpha, metric_name, val])
-    csv_text = buf.getvalue()
+    w.writerow(headers)
+    for model_id, task, mode, alpha, pairs in rows:
+        row = [task, model_id, mode, alpha]
+        for mname, val in pairs:
+            row += [mname, val]
+        while len(row) < len(headers):
+            row += ["N/A", "N/A"]
+        w.writerow(row)
+    return buf.getvalue()
+
+
+def _print_best_alpha_summary(all_results, csv_path=None):
+    """Print best-alpha CSV for a single model run; optionally write to file."""
+    rows = _build_best_rows(all_results)
+    if not rows:
+        return
+    csv_text = _rows_to_csv_text(rows)
 
     print(f"\n{'='*60}")
     print("BEST ALPHA SUMMARY (CSV)")

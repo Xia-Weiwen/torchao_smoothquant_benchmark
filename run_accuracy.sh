@@ -19,10 +19,6 @@
 
 set -euo pipefail
 
-if [[ "${CONDA_DEFAULT_ENV:-}" != "dev" ]]; then
-    echo "ERROR: conda activate dev first"; exit 1
-fi
-
 export LD_PRELOAD="${CONDA_PREFIX}/lib/libiomp5.so:${CONDA_PREFIX}/lib/libtcmalloc.so"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 export KMP_AFFINITY="${KMP_AFFINITY:-granularity=fine,compact,1,0}"
