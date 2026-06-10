@@ -57,7 +57,7 @@ ALPHA_SWEEP="${ALPHA_SWEEP:-0.25 0.4 0.5 0.7 0.75 0.8 0.85 0.9}"
 COMPILE_FLAG=""
 [[ "${AOTI}" == "1" ]] && COMPILE_FLAG="--aoti"
 
-DATETIME="$(date +'%Y-%m-%d %H:%M:%S')"
+DATETIME="$(date +'%Y%m%d_%H%M%S')"
 
 # ── SQuAD ─────────────────────────────────────────────────────────────────────
 if [[ "${TASK}" == "squad" || "${TASK}" == "all" ]]; then
