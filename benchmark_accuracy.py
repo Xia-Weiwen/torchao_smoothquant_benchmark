@@ -612,6 +612,8 @@ def main():
             all_results["tasks"]["squad"] = run_squad(args, quant_modes)
         elif task == "mnli":
             all_results["tasks"]["mnli"] = run_mnli(args, quant_modes)
+        all_results["tasks"][task]["num_calib"] = args.num_calib
+        all_results["tasks"][task]["num_samples"] = args.num_samples
 
     print(f"\n{'='*60}")
     print("SUMMARY")

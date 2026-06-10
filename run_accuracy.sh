@@ -52,10 +52,12 @@ case "${MODE}" in
     *) echo "ERROR: Unknown MODE '${MODE}'. Valid: fp32 bf16 smooth-static smooth-static-autocast smooth-dynamic smooth-dynamic-autocast all"; exit 1 ;;
 esac
 
-ALPHA_SWEEP="0.25 0.4 0.5 0.7 0.75 0.8 0.85 0.9"
+ALPHA_SWEEP="${ALPHA_SWEEP:-0.25 0.4 0.5 0.7 0.75 0.8 0.85 0.9}"
 
 COMPILE_FLAG=""
 [[ "${AOTI}" == "1" ]] && COMPILE_FLAG="--aoti"
+
+DATETIME="$(date +'%Y-%m-%d %H:%M:%S')"
 
 # ── SQuAD ─────────────────────────────────────────────────────────────────────
 if [[ "${TASK}" == "squad" || "${TASK}" == "all" ]]; then
@@ -81,7 +83,7 @@ if [[ "${TASK}" == "squad" || "${TASK}" == "all" ]]; then
             --alpha       ${ALPHA_SWEEP} \
             --num-samples "${NUM_SAMPLES}" \
             --num-calib   "${NUM_CALIB}" \
-            --output      "${OUTDIR}/squad_${KEY}.json" \
+            --output      "${OUTDIR}/squad_${KEY}_${MODE}_${DATETIME}.json" \
             ${COMPILE_FLAG} \
             || echo "WARNING: SQuAD benchmark failed for ${KEY}"
     done
@@ -111,7 +113,7 @@ if [[ "${TASK}" == "mnli" || "${TASK}" == "all" ]]; then
             --alpha       ${ALPHA_SWEEP} \
             --num-samples "${NUM_SAMPLES}" \
             --num-calib   "${NUM_CALIB}" \
-            --output      "${OUTDIR}/mnli_${KEY}.json" \
+            --output      "${OUTDIR}/mnli_${KEY}_${MODE}_${DATETIME}.json" \
             ${COMPILE_FLAG} \
             || echo "WARNING: MNLI benchmark failed for ${KEY}"
     done
