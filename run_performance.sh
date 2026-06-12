@@ -10,12 +10,12 @@ max_idx=$(( $n_cores - 1 ))
 model_list="xlm-roberta-base bert-large-uncased distilbert-base-uncased"
 extra_args="--aoti --profile"
 cases=(
-    "--quant-mode none --aoti --profile"
-    "--quant-mode none --autocast --aoti --profile"
-    "--quant-mode smooth-dynamic --autocast --aoti --profile"
-    "--quant-mode smooth-static --autocast --aoti --profile"
-    "--quant-mode smooth-dynamic --aoti --profile"
-    "--quant-mode smooth-static --aoti --profile"
+    "--quant-mode none"
+    "--quant-mode none --autocast"
+    "--quant-mode smooth-dynamic --autocast"
+    "--quant-mode smooth-static --autocast"
+    # "--quant-mode smooth-dynamic" # uncomment these lines to run without autocast
+    # "--quant-mode smooth-static"
 )
 for model in ${model_list}; do
     for case in "${cases[@]}"; do
